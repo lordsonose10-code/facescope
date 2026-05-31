@@ -1,0 +1,1455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>FaceScope</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Syne:wght@400;600;700;800&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.2.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js"></script>
+
+<style>
+/* ═══════════════════════════════════════════
+   DESIGN SYSTEM — Biopunk Medical Scanner
+   Palette: deep navy + warm amber + ice teal
+   Typography: Syne (display) + DM Mono (data)
+═══════════════════════════════════════════ */
+:root {
+  --bg:         #08090f;
+  --bg2:        #0d1018;
+  --surface:    #111520;
+  --glass:      rgba(16,20,34,0.82);
+  --border:     rgba(255,255,255,0.06);
+  --border-hi:  rgba(255,255,255,0.12);
+  --amber:      #f5a623;
+  --amber-dim:  rgba(245,166,35,0.15);
+  --amber-glow: 0 0 20px rgba(245,166,35,0.35);
+  --teal:       #2de2c4;
+  --teal-dim:   rgba(45,226,196,0.12);
+  --teal-glow:  0 0 16px rgba(45,226,196,0.3);
+  --green:      #3dffa0;
+  --green-dim:  rgba(61,255,160,0.12);
+  --red:        #ff4d6a;
+  --red-dim:    rgba(255,77,106,0.12);
+  --yellow:     #ffe566;
+  --yellow-dim: rgba(255,229,102,0.12);
+  --text:       #c4cfe8;
+  --text-dim:   #4a5570;
+  --text-mid:   #8896b0;
+  --text-hi:    #eef2ff;
+  --mono:       'DM Mono', monospace;
+  --display:    'Syne', sans-serif;
+  --body:       'Space Grotesk', sans-serif;
+  --r:          8px;
+  --r-sm:       4px;
+  /* safe area insets for notched phones */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+html {
+  height: 100%;
+  /* prevent elastic bounce scroll on iOS */
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+}
+
+body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  padding-top: var(--sat);
+  padding-bottom: var(--sab);
+  padding-left: var(--sal);
+  padding-right: var(--sar);
+}
+
+/* ── LAYOUT: mobile-first single column, desktop 2-col ── */
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── HEADER ── */
+header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  height: 48px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  gap: 10px;
+  z-index: 10;
+}
+
+.logo {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--text-hi);
+}
+.logo em {
+  color: var(--amber);
+  font-style: normal;
+}
+.logo-sub {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.12em;
+  display: none; /* hidden on small screens */
+}
+
+.h-sep { flex: 1; }
+
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  background: var(--surface);
+  white-space: nowrap;
+}
+.s-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+.s-dot.live   { background: var(--green); box-shadow: 0 0 5px var(--green); animation: pulse 2s infinite; }
+.s-dot.load   { background: var(--amber); animation: blink 0.7s infinite; }
+.s-dot.err    { background: var(--red); }
+
+#fps {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  min-width: 52px;
+  text-align: center;
+}
+
+/* ── MAIN CONTENT AREA ── */
+.content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── VIDEO SECTION ── */
+.video-section {
+  position: relative;
+  flex-shrink: 0;
+  background: #000;
+  /* On mobile: video takes ~55% of screen height */
+  height: 55vmin;
+  min-height: 200px;
+  max-height: 55vh;
+  overflow: hidden;
+}
+
+#video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transform: scaleX(-1);
+}
+
+#overlay-canvas {
+  position: absolute;
+  top: 0; left: 0;
+  /* Canvas matches natural video dimensions — JS handles scaling */
+  pointer-events: none;
+  /* Mirror to match video */
+  transform: scaleX(-1);
+  transform-origin: center center;
+}
+
+/* HUD frame corners */
+.hud { position: absolute; inset: 0; pointer-events: none; }
+.hc {
+  position: absolute;
+  width: 18px; height: 18px;
+  border-color: var(--amber);
+  border-style: solid;
+  opacity: 0.5;
+}
+.hc.tl { top: 12px; left: 12px; border-width: 1.5px 0 0 1.5px; }
+.hc.tr { top: 12px; right: 12px; border-width: 1.5px 1.5px 0 0; }
+.hc.bl { bottom: 12px; left: 12px; border-width: 0 0 1.5px 1.5px; }
+.hc.br { bottom: 12px; right: 12px; border-width: 0 1.5px 1.5px 0; }
+
+.scan-line {
+  position: absolute;
+  left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(245,166,35,0.5), transparent);
+  animation: scan 4s linear infinite;
+  pointer-events: none;
+}
+
+/* No-face overlay */
+#no-face {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  pointer-events: none;
+  transition: opacity 0.3s;
+  gap: 8px;
+}
+#no-face svg { opacity: 0.15; }
+#no-face span {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.15em;
+}
+
+/* ── OVERLAY SCREENS ── */
+.screen {
+  position: absolute; inset: 0;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 18px;
+  z-index: 50;
+  padding: 24px;
+}
+.screen-title {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--amber);
+  text-transform: uppercase;
+}
+.screen-body {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-mid);
+  text-align: center;
+  line-height: 1.7;
+  max-width: 280px;
+}
+.screen-body.err { color: var(--red); }
+
+.load-track {
+  width: min(260px, 80vw);
+  height: 2px;
+  background: var(--border-hi);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.load-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--amber), var(--teal));
+  width: 0%;
+  transition: width 0.4s ease;
+}
+.load-lbl {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+}
+
+.btn {
+  padding: 10px 22px;
+  background: transparent;
+  border: 1px solid var(--amber);
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  text-transform: uppercase;
+  transition: all 0.2s;
+  min-height: 44px; /* touch target */
+  min-width: 44px;
+}
+.btn:active { background: var(--amber-dim); }
+
+/* ── PANELS SCROLLABLE ROW ── */
+.panels {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--border);
+}
+.panels::-webkit-scrollbar { display: none; }
+
+/* ── PANEL BLOCK ── */
+.pb {
+  background: var(--bg2);
+  padding: 14px 16px;
+  flex-shrink: 0;
+}
+.pb-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.pb-label::after { content: ''; flex: 1; height: 1px; background: var(--border-hi); }
+
+/* ── AUTH BADGE ── */
+.auth-card {
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  transition: border-color 0.4s, background 0.4s;
+}
+.auth-card.real     { border-color: var(--green); background: var(--green-dim); }
+.auth-card.fake     { border-color: var(--red);   background: var(--red-dim); }
+.auth-card.uncertain{ border-color: var(--yellow); background: var(--yellow-dim); }
+
+.auth-icon {
+  font-size: 26px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.auth-right { flex: 1; min-width: 0; }
+.auth-verdict {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-hi);
+  white-space: nowrap;
+}
+.auth-card.real     .auth-verdict { color: var(--green); }
+.auth-card.fake     .auth-verdict { color: var(--red); }
+.auth-card.uncertain .auth-verdict { color: var(--yellow); }
+
+.auth-conf {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-mid);
+  margin-top: 2px;
+}
+.auth-signal {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-top: 6px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* ── DOMINANT EXPRESSION ── */
+.dom-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.dom-name {
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text-hi);
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+.dom-conf {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--amber);
+}
+
+/* ── EXPRESSION BARS ── */
+.expr-list { display: flex; flex-direction: column; gap: 7px; }
+.expr-row { }
+.expr-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 3px;
+}
+.expr-name {
+  font-family: var(--body);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-mid);
+  text-transform: uppercase;
+}
+.expr-name.dom { color: var(--amber); }
+.expr-pct {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.expr-pct.dom { color: var(--amber); }
+.expr-track {
+  height: 3px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.expr-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.12s ease;
+}
+
+/* ── METRICS GRID ── */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.metric-chip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+}
+.metric-label {
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.15em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.metric-val {
+  font-family: var(--mono);
+  font-size: 16px;
+  color: var(--text-hi);
+  font-weight: 500;
+}
+
+/* ── CAMERA SELECT ── */
+#device-select {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  color: var(--text);
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  outline: none;
+  min-height: 44px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+#device-select:focus { border-color: var(--amber); }
+
+/* ── TIMELINE ── */
+.tl { display: flex; flex-direction: column; gap: 3px; }
+.tl-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border-left: 2px solid var(--border-hi);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  animation: slideIn 0.2s ease;
+}
+.tl-entry.real     { border-left-color: var(--green); }
+.tl-entry.fake     { border-left-color: var(--red); }
+.tl-entry.uncertain{ border-left-color: var(--yellow); }
+.tl-t   { color: var(--text-dim); min-width: 44px; }
+.tl-e   { flex: 1; color: var(--text-mid); font-size: 9px; }
+.tl-a   { font-size: 9px; }
+.tl-a.real     { color: var(--green); }
+.tl-a.fake     { color: var(--red); }
+.tl-a.uncertain{ color: var(--yellow); }
+
+/* ── ANIMATIONS ── */
+@keyframes scan {
+  0%   { top: -1px; opacity: 0; }
+  5%   { opacity: 1; }
+  95%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ══ DESKTOP LAYOUT ══ */
+@media (min-width: 700px) {
+  .content {
+    flex-direction: row;
+    overflow: hidden;
+  }
+  .video-section {
+    flex: 1;
+    min-width: 0;
+    height: auto;
+    max-height: none;
+    min-height: 0;
+  }
+  .panels {
+    width: 300px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border);
+  }
+  .logo-sub { display: block; }
+  header { height: 52px; }
+}
+
+@media (min-width: 1024px) {
+  .panels { width: 340px; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- HEADER -->
+  <header>
+    <div>
+      <div class="logo">FACE<em>SCOPE</em></div>
+      <div class="logo-sub">EXPRESSION ANALYSIS SYSTEM</div>
+    </div>
+    <div class="h-sep"></div>
+    <div class="status-pill">
+      <div class="s-dot load" id="s-dot"></div>
+      <span id="s-text">Init…</span>
+    </div>
+    <div id="fps">-- FPS</div>
+  </header>
+
+  <!-- MAIN CONTENT -->
+  <div class="content">
+
+    <!-- VIDEO -->
+    <div class="video-section" id="video-section">
+      <video id="video" autoplay muted playsinline webkit-playsinline></video>
+      <canvas id="overlay-canvas"></canvas>
+
+      <div class="hud">
+        <div class="hc tl"></div>
+        <div class="hc tr"></div>
+        <div class="hc bl"></div>
+        <div class="hc br"></div>
+        <div class="scan-line"></div>
+      </div>
+
+      <div id="no-face">
+        <svg width="52" height="52" viewBox="0 0 52 52" fill="none">
+          <circle cx="26" cy="26" r="24" stroke="white" stroke-width="1"/>
+          <circle cx="18" cy="22" r="3" stroke="white" stroke-width="1"/>
+          <circle cx="34" cy="22" r="3" stroke="white" stroke-width="1"/>
+          <path d="M16 36 Q26 30 36 36" stroke="white" stroke-width="1" fill="none" stroke-linecap="round"/>
+        </svg>
+        <span>AWAITING FACE</span>
+      </div>
+
+      <!-- Loading -->
+      <div class="screen" id="screen-load">
+        <div class="screen-title">Loading Models</div>
+        <div class="load-track"><div class="load-fill" id="load-bar"></div></div>
+        <div class="load-lbl" id="load-lbl">Initializing…</div>
+      </div>
+
+      <!-- Error -->
+      <div class="screen" id="screen-err" style="display:none">
+        <div class="screen-title" style="color:var(--red)">Error</div>
+        <div class="screen-body err" id="err-msg"></div>
+        <button class="btn" onclick="location.reload()">RETRY</button>
+      </div>
+
+      <!-- Permission -->
+      <div class="screen" id="screen-perm" style="display:none">
+        <div class="screen-title">Camera Access Required</div>
+        <div class="screen-body">
+          Allow camera access when prompted.<br><br>
+          If blocked: Settings → Site Settings → Camera → Allow
+        </div>
+        <button class="btn" id="btn-cam">REQUEST CAMERA</button>
+      </div>
+    </div>
+
+    <!-- PANELS -->
+    <div class="panels">
+
+      <!-- Auth -->
+      <div class="pb">
+        <div class="pb-label">Authenticity</div>
+        <div class="auth-card uncertain" id="auth-card">
+          <div class="auth-icon" id="auth-icon">🟡</div>
+          <div class="auth-right">
+            <div class="auth-verdict" id="auth-verdict">UNCERTAIN</div>
+            <div class="auth-conf" id="auth-conf">confidence: —</div>
+            <div class="auth-signal" id="auth-signal">Awaiting expression…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dominant -->
+      <div class="pb">
+        <div class="pb-label">Detected Expression</div>
+        <div class="dom-row">
+          <div class="dom-name" id="dom-name">—</div>
+          <div class="dom-conf" id="dom-conf"></div>
+        </div>
+      </div>
+
+      <!-- Bars -->
+      <div class="pb">
+        <div class="pb-label">Expression Scores</div>
+        <div class="expr-list" id="expr-list"></div>
+      </div>
+
+      <!-- Metrics -->
+      <div class="pb">
+        <div class="pb-label">Facial Metrics</div>
+        <div class="metrics-grid">
+          <div class="metric-chip"><div class="metric-label">Symmetry</div><div class="metric-val" id="m-sym">—</div></div>
+          <div class="metric-chip"><div class="metric-label">Eye Crinkle</div><div class="metric-val" id="m-eye">—</div></div>
+          <div class="metric-chip"><div class="metric-label">Rise Time</div><div class="metric-val" id="m-rise">—</div></div>
+          <div class="metric-chip"><div class="metric-label">Landmarks</div><div class="metric-val" id="m-pts">—</div></div>
+        </div>
+      </div>
+
+      <!-- Camera -->
+      <div class="pb">
+        <div class="pb-label">Camera</div>
+        <select id="device-select"><option value="">Default camera</option></select>
+      </div>
+
+      <!-- Timeline -->
+      <div class="pb">
+        <div class="pb-label">Event Timeline</div>
+        <div class="tl" id="tl"></div>
+      </div>
+
+    </div><!-- /panels -->
+  </div><!-- /content -->
+</div><!-- /shell -->
+
+<script>
+'use strict';
+
+/* ─── CONSTANTS ─── */
+const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
+const EXPR_LABELS = ['neutral','happy','sad','angry','fearful','disgusted','surprised'];
+const EXPR_DISPLAY = {
+  neutral:'NEUTRAL', happy:'SMILING', sad:'SAD', angry:'ANGRY',
+  fearful:'FEARFUL', disgusted:'DISGUSTED', surprised:'SURPRISED', laughing:'LAUGHING'
+};
+// Colour per expression (used for bars and canvas annotations)
+const EXPR_COL = {
+  neutral:'#6e7fa0', happy:'#f5a623', sad:'#7ba7ff', angry:'#ff4d6a',
+  fearful:'#ff9d3d', disgusted:'#72e65a', surprised:'#ffe566', laughing:'#3dffa0'
+};
+
+/* ─── DOM ─── */
+const $ = id => document.getElementById(id);
+const video       = $('video');
+const vsection    = $('video-section');
+const canvas      = $('overlay-canvas');
+const ctx         = canvas.getContext('2d');
+const screenLoad  = $('screen-load');
+const screenErr   = $('screen-err');
+const screenPerm  = $('screen-perm');
+const loadBar     = $('load-bar');
+const loadLbl     = $('load-lbl');
+const sDot        = $('s-dot');
+const sText       = $('s-text');
+const fpsEl       = $('fps');
+const noFaceEl    = $('no-face');
+const authCard    = $('auth-card');
+const authIcon    = $('auth-icon');
+const authVerdict = $('auth-verdict');
+const authConf    = $('auth-conf');
+const authSignal  = $('auth-signal');
+const domName     = $('dom-name');
+const domConf     = $('dom-conf');
+const exprList    = $('expr-list');
+const tlEl        = $('tl');
+const devSel      = $('device-select');
+const mSym        = $('m-sym');
+const mEye        = $('m-eye');
+const mRise       = $('m-rise');
+const mPts        = $('m-pts');
+
+/* ─── STATE ─── */
+let stream = null, rafId = null;
+let frameCount = 0, lastFpsT = performance.now(), fps = 0, fSkip = 0;
+let faceDetected = false;
+let exprOnset = {}, prevScores = {}, exprRise = {};
+const HIST = 30;
+let scoreHist = [];
+let tlEntries = [];
+let lastVerdict = null, lastTlTime = 0;
+
+/* ─── BUILD EXPR BARS ─── */
+EXPR_LABELS.forEach(n => {
+  const row = document.createElement('div');
+  row.className = 'expr-row';
+  row.innerHTML = `
+    <div class="expr-header">
+      <span class="expr-name" id="en-${n}">${EXPR_DISPLAY[n]||n.toUpperCase()}</span>
+      <span class="expr-pct" id="ep-${n}">0%</span>
+    </div>
+    <div class="expr-track">
+      <div class="expr-fill" id="ef-${n}" style="width:0%;background:${EXPR_COL[n]}"></div>
+    </div>`;
+  exprList.appendChild(row);
+});
+
+/* ═══════════════════════════════════════════
+   1. MODEL LOADING
+═══════════════════════════════════════════ */
+async function loadModels() {
+  const steps = [
+    { lbl:'Loading Face Detector…',   pct:20, fn: () => faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL) },
+    { lbl:'Loading Landmark Model…',  pct:55, fn: () => faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL) },
+    { lbl:'Loading Expression Model…',pct:85, fn: () => faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL) },
+    { lbl:'Warming up TF backend…',   pct:100,fn: async () => { await tf.ready(); tf.zeros([1,128,128,3]).dispose(); } },
+  ];
+  for (const s of steps) {
+    loadLbl.textContent = s.lbl;
+    await s.fn();
+    loadBar.style.width = s.pct + '%';
+  }
+}
+
+/* ═══════════════════════════════════════════
+   2. WEBCAM
+   Mobile Chrome needs: facingMode:'user', explicit w/h,
+   and for iOS: playsinline attribute (already set in HTML)
+═══════════════════════════════════════════ */
+async function startCamera(deviceId) {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  // On mobile, request lower resolution to ease processing load
+  const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+  const constraints = {
+    video: {
+      width:  { ideal: isMobile ? 640 : 1280 },
+      height: { ideal: isMobile ? 480 : 720 },
+      facingMode: 'user',
+      ...(deviceId ? { deviceId: { exact: deviceId } } : {})
+    },
+    audio: false
+  };
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = stream;
+    // On mobile Chrome, play() must be called explicitly after loadedmetadata
+    await new Promise((res, rej) => {
+      video.onloadedmetadata = () => video.play().then(res).catch(rej);
+      video.onerror = rej;
+    });
+    return true;
+  } catch (err) {
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      showPerm();
+    } else {
+      showErr(`Camera error: ${err.message}`);
+    }
+    return false;
+  }
+}
+
+async function enumDevices() {
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    const cams = devs.filter(d => d.kind === 'videoinput');
+    devSel.innerHTML = '';
+    cams.forEach((c, i) => {
+      const o = document.createElement('option');
+      o.value = c.deviceId;
+      o.textContent = c.label || `Camera ${i + 1}`;
+      devSel.appendChild(o);
+    });
+  } catch(e) {}
+}
+
+devSel.addEventListener('change', () => {
+  if (devSel.value) startCamera(devSel.value);
+});
+$('btn-cam').addEventListener('click', () => {
+  screenPerm.style.display = 'none';
+  startCamera(null).then(ok => { if (ok) startLoop(); });
+});
+
+/* ═══════════════════════════════════════════
+   3. CANVAS SCALING
+   
+   Critical for mobile: the canvas must match the
+   *natural* video resolution, then CSS scales it
+   to fill the container. We use transform to mirror
+   so overlay lines align with the mirrored video.
+═══════════════════════════════════════════ */
+function syncCanvas() {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh) return;
+
+  // Set canvas intrinsic resolution = video natural size
+  if (canvas.width !== vw || canvas.height !== vh) {
+    canvas.width  = vw;
+    canvas.height = vh;
+  }
+
+  // Size canvas to fill the video-section container using CSS
+  // We must account for the letterboxing from object-fit:cover
+  const cw = vsection.clientWidth;
+  const ch = vsection.clientHeight;
+
+  // The displayed video region (object-fit:cover crops, so we scale to cover)
+  const scaleX = cw / vw;
+  const scaleY = ch / vh;
+  const scale  = Math.max(scaleX, scaleY); // cover
+
+  const dispW = vw * scale;
+  const dispH = vh * scale;
+  const offX  = (cw - dispW) / 2;
+  const offY  = (ch - dispH) / 2;
+
+  // Position canvas to perfectly overlay the video region
+  canvas.style.width   = dispW + 'px';
+  canvas.style.height  = dispH + 'px';
+  canvas.style.left    = offX + 'px';
+  canvas.style.top     = offY + 'px';
+  // transform is already scaleX(-1) from CSS; transform-origin: center center
+  // We must correct the left offset for the mirror flip
+  // When scaleX(-1), the element flips around its own centre, so offX must be mirrored:
+  canvas.style.transform = `scaleX(-1)`;
+  canvas.style.transformOrigin = `${dispW/2 + offX}px center`;
+}
+
+/* ═══════════════════════════════════════════
+   4. DETECTION LOOP
+═══════════════════════════════════════════ */
+async function detectFrame() {
+  if (video.readyState < 2) return null;
+
+  syncCanvas();
+
+  const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 });
+  return await faceapi
+    .detectSingleFace(video, opts)
+    .withFaceLandmarks()
+    .withFaceExpressions();
+}
+
+async function loop() {
+  const result = await detectFrame();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!result) {
+    faceDetected = false;
+    noFaceEl.style.opacity = '1';
+  } else {
+    faceDetected = true;
+    noFaceEl.style.opacity = '0';
+
+    const { landmarks, expressions, detection } = result;
+    const pts = landmarks.positions;
+
+    drawOverlay(detection, pts, expressions);
+    updateExprUI(expressions, pts);
+
+    fSkip++;
+    if (fSkip >= 3) {
+      fSkip = 0;
+      const auth = computeAuth(expressions, pts);
+      updateAuthUI(auth);
+    }
+  }
+
+  // FPS
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsT >= 1000) {
+    fps = Math.round(frameCount * 1000 / (now - lastFpsT));
+    fpsEl.textContent = `${fps} FPS`;
+    frameCount = 0;
+    lastFpsT = now;
+  }
+
+  rafId = requestAnimationFrame(loop);
+}
+
+function startLoop() {
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+/* ═══════════════════════════════════════════
+   5. OVERLAY DRAWING
+   
+   Key design: all analysis annotations (eye boxes,
+   symmetry line, mouth marker) are drawn relative
+   to the detected face's bounding box and landmarks,
+   so they scale perfectly with any face size/position.
+═══════════════════════════════════════════ */
+function drawOverlay(detection, pts, expressions) {
+  const box = detection.box;
+
+  // ── Bounding box ──
+  ctx.strokeStyle = 'rgba(245,166,35,0.5)';
+  ctx.lineWidth = 1;
+  roundRect(ctx, box.x, box.y, box.width, box.height, 4);
+  ctx.stroke();
+
+  // ── Face centre cross (tiny) ──
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  ctx.strokeStyle = 'rgba(245,166,35,0.2)';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.moveTo(cx - 8, cy); ctx.lineTo(cx + 8, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8); ctx.stroke();
+
+  // ── Symmetry axis (face midline) ──
+  // Nose bridge top (pts[27]) to chin (pts[8])
+  ctx.strokeStyle = 'rgba(45,226,196,0.25)';
+  ctx.setLineDash([4, 6]);
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(pts[27].x, pts[27].y);
+  ctx.lineTo(pts[8].x,  pts[8].y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // ── Landmark points — colour-coded by region ──
+  pts.forEach((p, i) => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.4, 0, Math.PI * 2);
+    ctx.fillStyle = ptColor(i);
+    ctx.fill();
+  });
+
+  // ── Connecting mesh lines ──
+  drawMesh(pts);
+
+  // ── Analysis annotation overlays (face-relative) ──
+  drawAnalysisOverlays(pts, expressions, box);
+
+  mPts.textContent = pts.length;
+}
+
+/* Colour per landmark region */
+function ptColor(i) {
+  if (i <= 16) return 'rgba(245,166,35,0.4)';   // jawline — amber
+  if (i <= 26) return 'rgba(255,229,102,0.7)';  // brows — yellow
+  if (i <= 35) return 'rgba(45,226,196,0.7)';   // nose — teal
+  if (i <= 47) return 'rgba(123,170,255,0.8)';  // eyes — blue
+  return              'rgba(255,100,130,0.7)';  // lips — rose
+}
+
+/* Mesh connectors */
+function drawMesh(p) {
+  const ln = (a, b, col, w=0.6) => {
+    ctx.strokeStyle = col; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(p[a].x, p[a].y); ctx.lineTo(p[b].x, p[b].y); ctx.stroke();
+  };
+  const poly = (idx, col, close=false) => {
+    ctx.strokeStyle = col; ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    idx.forEach((i,n) => n ? ctx.lineTo(p[i].x, p[i].y) : ctx.moveTo(p[i].x, p[i].y));
+    if (close) ctx.closePath();
+    ctx.stroke();
+  };
+  poly([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], 'rgba(245,166,35,0.18)');
+  poly([17,18,19,20,21], 'rgba(255,229,102,0.35)');
+  poly([22,23,24,25,26], 'rgba(255,229,102,0.35)');
+  poly([27,28,29,30], 'rgba(45,226,196,0.35)');
+  poly([30,31,32,33,34,35,30], 'rgba(45,226,196,0.25)', true);
+  poly([36,37,38,39,40,41,36], 'rgba(123,170,255,0.5)', true);
+  poly([42,43,44,45,46,47,42], 'rgba(123,170,255,0.5)', true);
+  poly([48,49,50,51,52,53,54,55,56,57,58,59,48], 'rgba(255,100,130,0.45)', true);
+  poly([60,61,62,63,64,65,66,67,60], 'rgba(255,100,130,0.35)', true);
+}
+
+/*
+  ── ANALYSIS OVERLAYS ──
+  These are drawn in canvas (video) space, anchored
+  to the specific landmarks they analyse.
+  This means they scale and move with the face.
+*/
+function drawAnalysisOverlays(pts, expressions, box) {
+  const happy = expressions.happy || 0;
+
+  // ── Eye region highlight boxes (Duchenne marker) ──
+  if (happy > 0.15) {
+    // Build tight bounding rect around each eye group
+    const leftEyeIdx  = [36,37,38,39,40,41];
+    const rightEyeIdx = [42,43,44,45,46,47];
+    const eyePad = box.width * 0.02; // face-size-relative padding
+
+    [leftEyeIdx, rightEyeIdx].forEach(idx => {
+      const xs = idx.map(i => pts[i].x);
+      const ys = idx.map(i => pts[i].y);
+      const ex = Math.min(...xs) - eyePad;
+      const ey = Math.min(...ys) - eyePad;
+      const ew = Math.max(...xs) - ex + eyePad;
+      const eh = Math.max(...ys) - ey + eyePad;
+
+      // Crinkle colour: amber if crinkling detected, dim if not
+      const crinkle = computeEyeCrinkle(pts, happy);
+      const col = crinkle.ratio > 0.35
+        ? `rgba(61,255,160,${0.25 + crinkle.ratio * 0.3})`  // green = duchenne
+        : `rgba(255,77,106,0.25)`;                           // red = no crinkle
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 0.8;
+      roundRect(ctx, ex, ey, ew, eh, 2);
+      ctx.stroke();
+
+      // Label above eye box — scale font to face size
+      const fontSize = Math.max(8, Math.min(11, box.width * 0.035));
+      ctx.font = `${fontSize}px DM Mono, monospace`;
+      ctx.fillStyle = col;
+      ctx.fillText(
+        crinkle.ratio > 0.35 ? '◆ DUCHENNE' : '◇ NO CRINKLE',
+        ex, ey - 3
+      );
+    });
+  }
+
+  // ── Mouth openness indicator (laugh detection) ──
+  const mouthOpen = computeMouthOpen(pts);
+  if (mouthOpen > 0.08) {
+    // Draw a vertical line from inner top lip to inner bottom lip
+    const topLip = pts[62];
+    const botLip = pts[66];
+    const col = happy > 0.5 && mouthOpen > 0.25
+      ? 'rgba(61,255,160,0.7)'   // green = laughing
+      : 'rgba(245,166,35,0.5)';  // amber = open
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(topLip.x, topLip.y);
+    ctx.lineTo(botLip.x, botLip.y);
+    ctx.stroke();
+
+    // Tiny tick marks
+    const midX = (topLip.x + botLip.x) / 2;
+    const dist = Math.abs(botLip.y - topLip.y);
+    const tickW = Math.max(4, box.width * 0.02);
+    ctx.beginPath();
+    ctx.moveTo(midX - tickW, topLip.y); ctx.lineTo(midX + tickW, topLip.y);
+    ctx.moveTo(midX - tickW, botLip.y); ctx.lineTo(midX + tickW, botLip.y);
+    ctx.stroke();
+  }
+
+  // ── Symmetry bracket — spans jaw width, shows midpoint ──
+  {
+    const jawLeft  = pts[0];
+    const jawRight = pts[16];
+    const midPt    = pts[8];
+    const barY     = jawLeft.y + box.height * 0.06;
+    const symPct   = computeSymmetry(pts);
+    const symCol   = symPct > 0.65
+      ? 'rgba(45,226,196,0.35)'
+      : 'rgba(255,77,106,0.35)';
+
+    ctx.strokeStyle = symCol;
+    ctx.lineWidth = 0.7;
+    ctx.setLineDash([3, 5]);
+    // Left half
+    ctx.beginPath();
+    ctx.moveTo(jawLeft.x, barY);
+    ctx.lineTo(midPt.x,   barY);
+    ctx.stroke();
+    // Right half (dashed)
+    ctx.beginPath();
+    ctx.moveTo(midPt.x,   barY);
+    ctx.lineTo(jawRight.x, barY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Centre mark
+    ctx.beginPath();
+    ctx.arc(midPt.x, barY, 2, 0, Math.PI * 2);
+    ctx.fillStyle = symCol;
+    ctx.fill();
+
+    // Symmetry label — face-size-relative position & font
+    const fontSize = Math.max(7, Math.min(10, box.width * 0.03));
+    ctx.font = `${fontSize}px DM Mono, monospace`;
+    ctx.fillStyle = symCol;
+    ctx.fillText(`SYM ${(symPct*100).toFixed(0)}%`, midPt.x + 6, barY - 2);
+  }
+
+  // ── Brow raise indicator (surprise / fear) ──
+  const feared    = (expressions.fearful  || 0);
+  const surprised = (expressions.surprised || 0);
+  if (feared + surprised > 0.35) {
+    // Draw arcs over each brow
+    [
+      { ctr: pts[19], pts: [17,18,19,20,21] },
+      { ctr: pts[24], pts: [22,23,24,25,26] }
+    ].forEach(brow => {
+      const ys = brow.pts.map(i => pts[i].y);
+      const xs = brow.pts.map(i => pts[i].x);
+      const minY = Math.min(...ys) - box.height * 0.02;
+      ctx.strokeStyle = 'rgba(255,229,102,0.5)';
+      ctx.lineWidth = 0.8;
+      ctx.setLineDash([2,3]);
+      ctx.beginPath();
+      ctx.moveTo(Math.min(...xs), minY);
+      ctx.lineTo(Math.max(...xs), minY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+  }
+}
+
+/* Helper: roundRect path (polyfill for older mobile Chrome) */
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+/* ═══════════════════════════════════════════
+   6. EXPRESSION UI UPDATE
+═══════════════════════════════════════════ */
+function updateExprUI(expressions, pts) {
+  const scores = { ...expressions };
+
+  // Heuristic: LAUGHING = happy + open mouth
+  const mOpen = computeMouthOpen(pts);
+  if (scores.happy > 0.55 && mOpen > 0.22) {
+    const laugh = Math.min(1, scores.happy * mOpen * 2.2);
+    scores.laughing = laugh;
+    scores.happy = Math.max(0, scores.happy - laugh * 0.4);
+  }
+
+  let dom = 'neutral', maxS = 0;
+  for (const [k, v] of Object.entries(scores)) {
+    if (v > maxS) { maxS = v; dom = k; }
+  }
+
+  domName.textContent = EXPR_DISPLAY[dom] || dom.toUpperCase();
+  domConf.textContent = (maxS * 100).toFixed(0) + '%';
+
+  EXPR_LABELS.forEach(n => {
+    const v = scores[n] || 0;
+    const pct = (v * 100).toFixed(0);
+    const isDom = n === dom;
+    $(`en-${n}`).className = 'expr-name' + (isDom ? ' dom' : '');
+    $(`ep-${n}`).className = 'expr-pct'  + (isDom ? ' dom' : '');
+    $(`ep-${n}`).textContent = pct + '%';
+    const fill = $(`ef-${n}`);
+    fill.style.width = pct + '%';
+    fill.style.background = isDom
+      ? `linear-gradient(90deg, ${EXPR_COL[n]}88, ${EXPR_COL[n]})`
+      : EXPR_COL[n] + '70';
+  });
+
+  // Timing: track onset
+  const now = performance.now();
+  for (const [n, v] of Object.entries(scores)) {
+    const prev = prevScores[n] || 0;
+    if (v > 0.3 && prev < 0.1) exprOnset[n] = now;
+    else if (v < 0.05 && prev > 0.3 && exprOnset[n]) {
+      exprRise[n] = now - exprOnset[n];
+      delete exprOnset[n];
+    }
+  }
+  prevScores = { ...scores };
+
+  scoreHist.push({ t: now, scores: { ...scores } });
+  if (scoreHist.length > HIST) scoreHist.shift();
+}
+
+/* ═══════════════════════════════════════════
+   7. FAKE vs. REAL PIPELINE
+   
+   ① Duchenne marker  — eye crinkle (35%)
+   ② Timing analysis  — onset speed  (25%)
+   ③ Symmetry check   — bilateral    (25%)
+   ④ Micro-expression — history spike (15%)
+   
+   All measurements are normalised by face geometry
+   so they work correctly regardless of how close
+   or far the user is from the camera.
+═══════════════════════════════════════════ */
+function computeAuth(expressions, pts) {
+  const happy = expressions.happy || 0;
+  const anyExpr = Object.values(expressions).some(v => v > 0.22);
+  if (!anyExpr) {
+    return { verdict:'uncertain', icon:'🟡', conf:0, signal:'No significant expression' };
+  }
+
+  const sigs = [];
+
+  // ── ① Duchenne marker ──
+  if (happy > 0.18) {
+    const c = computeEyeCrinkle(pts, happy);
+    mEye.textContent = (c.ratio * 100).toFixed(0) + '%';
+    sigs.push({
+      score:  Math.min(c.ratio * 1.4, 1),
+      weight: 0.35,
+      label:  c.ratio > 0.38
+        ? `Duchenne: eye crinkle detected (${(c.ratio*100).toFixed(0)}%) ✓`
+        : `Duchenne: no eye crinkle (${(c.ratio*100).toFixed(0)}%) ✗`
+    });
+  } else {
+    mEye.textContent = '—';
+  }
+
+  // ── ② Timing ──
+  const domExpr = Object.entries(expressions).sort((a,b)=>b[1]-a[1])[0][0];
+  const rise = exprRise[domExpr];
+  let timingScore = 0.5, timingLbl = 'Timing: no data';
+  if (rise !== undefined) {
+    if      (rise < 150) { timingScore = 0.08; timingLbl = `Timing: ${rise.toFixed(0)}ms — too fast ✗`; }
+    else if (rise < 500) { timingScore = 0.42; timingLbl = `Timing: ${rise.toFixed(0)}ms — borderline`; }
+    else                 { timingScore = 0.88; timingLbl = `Timing: ${rise.toFixed(0)}ms — natural ✓`; }
+    mRise.textContent = rise.toFixed(0) + 'ms';
+  } else {
+    mRise.textContent = '—';
+  }
+  sigs.push({ score: timingScore, weight: 0.25, label: timingLbl });
+
+  // ── ③ Symmetry ──
+  const sym = computeSymmetry(pts);
+  const symScore = (sym > 0.55 && sym < 0.96) ? 0.82
+                 : (sym < 0.4)                 ? 0.12
+                 :                               0.48;
+  const symPct = (sym * 100).toFixed(0);
+  mSym.textContent = symPct + '%';
+  sigs.push({
+    score:  symScore,
+    weight: 0.25,
+    label:  `Symmetry: ${symPct}% — ${symScore > 0.7 ? 'natural ✓' : symScore < 0.25 ? 'suspicious ✗' : 'borderline'}`
+  });
+
+  // ── ④ Micro-expression ──
+  const micro = detectMicro(expressions);
+  sigs.push({ score: micro.score, weight: 0.15, label: micro.label });
+
+  // Weighted realness score
+  const totalW = sigs.reduce((s, x) => s + x.weight, 0);
+  const real   = sigs.reduce((s, x) => s + x.score * x.weight, 0) / totalW;
+
+  let verdict, icon;
+  if      (real >= 0.62) { verdict = 'real';      icon = '🟢'; }
+  else if (real <= 0.38) { verdict = 'fake';      icon = '🔴'; }
+  else                   { verdict = 'uncertain'; icon = '🟡'; }
+
+  const primary = [...sigs].sort(
+    (a, b) => Math.abs(b.score-0.5)*b.weight - Math.abs(a.score-0.5)*a.weight
+  )[0];
+
+  return {
+    verdict, icon,
+    conf: (Math.abs(real - 0.5) * 2 * 100).toFixed(0),
+    signal: primary.label
+  };
+}
+
+/* ── Duchenne / Eye Crinkle
+   Computes face-size-normalised eye aperture reduction.
+   Normalised by inter-ocular distance (IOD) so it's
+   independent of how close the user is to the camera.
+*/
+function computeEyeCrinkle(pts, happy) {
+  const openL = Math.abs(pts[37].y - pts[41].y) + Math.abs(pts[38].y - pts[40].y);
+  const openR = Math.abs(pts[43].y - pts[47].y) + Math.abs(pts[44].y - pts[46].y);
+  const avgOpen = (openL + openR) / 2;
+  // IOD = inner corner of right eye to inner corner of left eye
+  const iod = Math.hypot(pts[42].x - pts[39].x, pts[42].y - pts[39].y);
+  const norm = avgOpen / (iod + 1);
+  // Lower norm = more closed = more Duchenne
+  const raw = (1 - Math.min(norm / 0.36, 1)) * happy;
+  return { ratio: Math.max(0, Math.min(1, raw)), norm };
+}
+
+/* ── Bilateral symmetry
+   Compares mouth corners and brow arches left vs right.
+   All distances normalised by face width for scale invariance.
+*/
+function computeSymmetry(pts) {
+  const faceW = Math.hypot(pts[16].x - pts[0].x, pts[16].y - pts[0].y) + 1;
+  const jawX  = pts[8].x, jawY = pts[8].y;
+  const dL = Math.hypot(pts[48].x - jawX, pts[48].y - jawY) / faceW;
+  const dR = Math.hypot(pts[54].x - jawX, pts[54].y - jawY) / faceW;
+  const mouthSym = 1 - Math.abs(dL - dR) / (Math.max(dL, dR) + 0.001);
+
+  const nose = pts[30];
+  const bL = Math.abs(pts[19].y - nose.y) / faceW;
+  const bR = Math.abs(pts[24].y - nose.y) / faceW;
+  const browSym = 1 - Math.abs(bL - bR) / (Math.max(bL, bR) + 0.001);
+
+  return mouthSym * 0.6 + browSym * 0.4;
+}
+
+/* ── Mouth open ratio, normalised by face height ── */
+function computeMouthOpen(pts) {
+  const lipDist = Math.abs(pts[62].y - pts[66].y);
+  const faceH   = Math.abs(pts[8].y  - pts[27].y) + 1;
+  return lipDist / faceH;
+}
+
+/* ── Micro-expression: scan history for brief spikes ── */
+function detectMicro(exprs) {
+  if (scoreHist.length < 10) return { score: 0.5, label: 'Micro: insufficient history' };
+  const dom = Object.entries(exprs).sort((a,b)=>b[1]-a[1])[0][0];
+  const hist = scoreHist.slice(0, -3);
+  let inSpike = false, sLen = 0;
+  for (const frame of hist) {
+    const v = frame.scores[dom] || 0;
+    if (v > 0.28) { inSpike = true; sLen++; }
+    else if (inSpike) {
+      if (sLen >= 2 && sLen <= 7) {
+        return { score: 0.86, label: `Micro: genuine ${dom} flash (${sLen} frames) ✓` };
+      }
+      inSpike = false; sLen = 0;
+    }
+  }
+  return { score: 0.5, label: 'Micro: no clear micro-expression' };
+}
+
+/* ═══════════════════════════════════════════
+   8. AUTH UI
+═══════════════════════════════════════════ */
+function updateAuthUI({ verdict, icon, conf, signal }) {
+  authCard.className = `auth-card ${verdict}`;
+  authIcon.textContent = icon;
+  authVerdict.textContent =
+    verdict === 'real' ? 'REAL' : verdict === 'fake' ? 'LIKELY FAKE' : 'UNCERTAIN';
+  authConf.textContent = `confidence: ${conf || '—'}%`;
+  authSignal.textContent = signal;
+
+  const now = Date.now();
+  if ((verdict !== lastVerdict || now - lastTlTime > 3000) && faceDetected) {
+    addTlEntry(verdict, icon);
+    lastTlTime = now;
+    lastVerdict = verdict;
+  }
+}
+
+function addTlEntry(verdict, icon) {
+  const now = Date.now();
+  tlEntries = tlEntries.filter(e => now - e.ts < 10000);
+  const t = new Date().toLocaleTimeString('en',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const expr = domName.textContent;
+  tlEntries.push({ ts: now, verdict, t, expr });
+
+  const el = document.createElement('div');
+  el.className = `tl-entry ${verdict}`;
+  el.innerHTML = `<span class="tl-t">${t}</span><span class="tl-e">${expr}</span><span class="tl-a ${verdict}">${icon} ${verdict.toUpperCase()}</span>`;
+  tlEl.prepend(el);
+  while (tlEl.children.length > 20) tlEl.removeChild(tlEl.lastChild);
+}
+
+/* ═══════════════════════════════════════════
+   9. STATUS HELPERS
+═══════════════════════════════════════════ */
+function setStatus(mode, txt) {
+  sDot.className = `s-dot ${mode}`;
+  sText.textContent = txt;
+}
+function showErr(msg) {
+  screenLoad.style.display = 'none';
+  screenPerm.style.display = 'none';
+  screenErr.style.display  = 'flex';
+  $('err-msg').textContent = msg;
+  setStatus('err', 'Error');
+}
+function showPerm() {
+  screenLoad.style.display = 'none';
+  screenPerm.style.display = 'flex';
+  setStatus('err', 'Permission denied');
+}
+
+/* ═══════════════════════════════════════════
+   10. INIT
+═══════════════════════════════════════════ */
+async function init() {
+  setStatus('load', 'Loading…');
+  try {
+    await loadModels();
+  } catch(e) {
+    showErr(`Model load failed: ${e.message}`);
+    return;
+  }
+
+  loadLbl.textContent = 'Starting camera…';
+  loadBar.style.width = '100%';
+
+  const ok = await startCamera(null);
+  if (!ok) return;
+
+  await enumDevices();
+  screenLoad.style.display = 'none';
+  setStatus('live', 'Live');
+
+  // Re-sync canvas on orientation change & resize (critical for mobile)
+  window.addEventListener('resize', syncCanvas);
+  screen.orientation && screen.orientation.addEventListener('change', () => {
+    setTimeout(syncCanvas, 300); // allow layout to settle after rotation
+  });
+
+  startLoop();
+}
+
+if (!navigator.mediaDevices?.getUserMedia) {
+  showErr('Camera API not supported. Use Chrome, Firefox, or Edge.');
+} else {
+  init();
+}
+</script>
+</body>
+</html>
